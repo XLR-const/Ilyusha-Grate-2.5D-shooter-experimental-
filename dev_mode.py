@@ -357,12 +357,17 @@ class DevGame:
                             else:
                                 self.weapon = prev
                             break
+                if event.key == pygame.K_SPACE:
+                    if self.weapon:
+                        if not self.weapon.reloading and not self.weapon.is_continuous:
+                            self.weapon.fire()
 
             # Стрельба и колесо мыши
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1 and self.weapon:
                     if not self.weapon.reloading and not self.weapon.is_continuous:
                         self.weapon.fire()
+                        
 
                 if event.button == 4:
                     self.level_manager.current_weapon_index = (
@@ -375,6 +380,8 @@ class DevGame:
                         self.level_manager.current_weapon_index - 1
                     ) % max(1, len(self.inventory))
                     self.weapon = self.inventory[self.level_manager.current_weapon_index]
+
+
 
     def run(self):
         """Главный цикл"""

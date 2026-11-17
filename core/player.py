@@ -187,13 +187,45 @@ class Player:
             self.y += dy
 
     def mouse_control(self):
-        """Обрабатывает поворот камеры от мыши"""
+        """Обрабатывает поворот камеры от мыши и стрелок с ускорением"""
+        # 1. Управление мышью
         mx, my = pygame.mouse.get_pos()
-
         if mx != WIDTH // 2:
             dx = mx - WIDTH // 2
             self.angle += dx * MOUSE_SENSITIVITY
             pygame.mouse.set_pos([WIDTH // 2, HEIGHT // 2])
+
+        # 2. Управление стрелками с ускорением
+        # Инициализация переменной скорости, если её еще нет
+        if not hasattr(self, 'arrow_speed'):
+            self.arrow_speed = 0.0
+            
+        ACCEL = 0.001        # Ускорение (как быстро набирается скорость)
+        FRICTION = 0.85      # Трение (как быстро останавливается, 0.85 = плавное затухание)
+        MAX_SPEED = 0.1      # Максимальная скорость поворота
+
+        keys = pygame.key.get_pressed()
+        
+        if keys[pygame.K_LEFT]:
+            self.arrow_speed -= ACCEL
+        elif keys[pygame.K_RIGHT]:
+            self.arrow_speed += ACCEL
+        else:
+            # Если клавиши отпущены — плавно гасим скорость
+            self.arrow_speed *= FRICTION
+            
+            # Чтобы камера не "дрожала" от микроскопических значений, обнуляем
+            if abs(self.arrow_speed) < 0.0001:
+                self.arrow_speed = 0.0
+
+        # Ограничиваем максимальную скорость
+        if self.arrow_speed > MAX_SPEED:
+            self.arrow_speed = MAX_SPEED
+        elif self.arrow_speed < -MAX_SPEED:
+            self.arrow_speed = -MAX_SPEED
+
+        # Применяем скорость к углу
+        self.angle += self.arrow_speed
 
     def update(self):
         """Обновляет состояние игрока"""
