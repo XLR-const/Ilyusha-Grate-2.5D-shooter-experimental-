@@ -18,35 +18,99 @@ class WeaponSelector:
         self.vy = 0
         self.icon_cache = {}
 
-    def check_input(self, event):
-        """Обрабатывает зажатие/отпускание клавиш и прокрутку колесика мыши"""
-        valid_keys = (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_q)
-        
-        if event.type == pygame.KEYDOWN:
-            if event.key in valid_keys:
-                if not self.active:
-                    self.active = True
-                    self.vx = 0
-                    self.vy = 0
-                    pygame.mouse.get_rel() 
-                return True
+        self.held_key = None          # какая валидная клавиша сейчас зажата
+        self.held_since = 0           # pygame.time.get_ticks() в момент нажатия
+        self.tap_threshold_ms = 250   # порог тап vs удержание
+        self.last_tap_key = None      # для циклического переключения пушек
 
-        if event.type == pygame.KEYUP:
-            if event.key in valid_keys and self.active:
+    def check_input(self, event):
+        valid_keys = (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_q)
+
+        if event.type == pygame.KEYDOWN and event.key in valid_keys:
+            # 🔥 просто запускаем таймер нажатия, колесо НЕ открываем
+            self.held_key = event.key
+            self.held_since = pygame.time.get_ticks()
+            return True
+
+        if event.type == pygame.KEYUP and event.key in valid_keys:
+            held_ms = pygame.time.get_ticks() - self.held_since
+
+            if self.held_key == event.key:
+                # клавиша была отпущена раньше, чем update успел открыть колесо → это тап
+                self.held_key = None
+                self._handle_tap(event.key)
+            elif self.active:
+                # колесо уже открыто → подтверждаем выбор
                 self.confirm_selection()
-                return True
+            return True
 
         if self.active and event.type == pygame.MOUSEBUTTONDOWN:
             weapons_in_hovered = self._get_weapons_in_slot(self.hovered_slot)
             if len(weapons_in_hovered) > 1:
-                if event.button == 4: # Скролл ВВЕРХ
+                if event.button == 4:
                     self.sub_indices[self.hovered_slot] = (self.sub_indices[self.hovered_slot] - 1) % len(weapons_in_hovered)
                     return True
-                elif event.button == 5: # Скролл ВНИЗ
+                elif event.button == 5:
                     self.sub_indices[self.hovered_slot] = (self.sub_indices[self.hovered_slot] + 1) % len(weapons_in_hovered)
                     return True
 
         return False
+
+
+    def _handle_tap(self, key):
+        """Одиночный тап по цифре:
+        - первый тап по слоту = выбрать слот (применить текущую пушку);
+        - каждый следующий тап по ТОЙ ЖЕ цифре = переключить на следующую пушку в слоте.
+        """
+        key_to_slot = {
+            pygame.K_1: 1, pygame.K_2: 2, pygame.K_3: 3,
+            pygame.K_4: 4, pygame.K_5: 5, pygame.K_6: 6,
+        }
+
+        if key == pygame.K_q:
+            self.active = False
+            pygame.mouse.get_rel()
+            return
+
+        slot_num = key_to_slot.get(key)
+        if slot_num is None:
+            return
+        self.hovered_slot = slot_num
+
+        weapons = self._get_weapons_in_slot(slot_num)
+
+        # Если это повторное нажатие по тому же слоту — крутим sub_index дальше
+        if self.last_tap_key == key and len(weapons) > 1:
+            self.sub_indices[slot_num] = (self.sub_indices[slot_num] + 1) % len(weapons)
+            print(f"🔁 [TAP] Слот {slot_num}: пушка {self.sub_indices[slot_num] + 1}/{len(weapons)}")
+        else:
+            # Первый тап по этому слоту — просто применяем текущую пушку
+            print(f"✅ [TAP] Слот {slot_num} выбран")
+
+        self.last_tap_key = key
+        self._apply_weapon(slot_num)
+
+        # Закрываем колесо — тап = мгновенный выбор без визуального колеса
+        self.active = False
+        pygame.mouse.get_rel()
+
+    def _apply_weapon(self, slot_num):
+        """Применяет текущую выбранную пушку из слота в инвентарь игры."""
+        weapons = self._get_weapons_in_slot(slot_num)
+        if not weapons:
+            return
+        chosen_sub_idx = min(self.sub_indices[slot_num], len(weapons) - 1)
+        chosen_sub_idx = max(0, chosen_sub_idx)
+        target_inventory_idx = weapons[chosen_sub_idx]['inventory_index']
+
+        game_obj = self.game
+        inventory = getattr(game_obj, 'inventory', [])
+        level_manager = getattr(game_obj, 'level_manager', None)
+
+        if level_manager is not None and target_inventory_idx < len(inventory):
+            level_manager.current_weapon_index = target_inventory_idx
+            game_obj.weapon = inventory[target_inventory_idx]
+            print(f"🎯 [Селектор] Слот {slot_num}, индекс {target_inventory_idx}")
 
     def check_mouse_click(self, event):
         if self.active and event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 4, 5):
@@ -54,29 +118,29 @@ class WeaponSelector:
         return False
 
     def confirm_selection(self):
-        """Берет выбранную пушку и передает ее в инвентарь игры"""
-        weapons = self._get_weapons_in_slot(self.hovered_slot)
-        if weapons:
-            chosen_sub_idx = min(self.sub_indices[self.hovered_slot], len(weapons) - 1)
-            chosen_sub_idx = max(0, chosen_sub_idx)
-            
-            target_inventory_idx = weapons[chosen_sub_idx]['inventory_index']
-            
-            game_obj = self.game
-            inventory = getattr(game_obj, 'inventory', [])
-            level_manager = getattr(game_obj, 'level_manager', None)
-            
-            if level_manager is not None and target_inventory_idx < len(inventory):
-                level_manager.current_weapon_index = target_inventory_idx
-                game_obj.weapon = inventory[target_inventory_idx]
-                print(f"🎯 [КОЛЕСО ОРУЖИЯ] Активирован слот {self.hovered_slot}, индекс: {target_inventory_idx}")
-                
-        pygame.mouse.get_rel() 
+        self._apply_weapon(self.hovered_slot)
+        pygame.mouse.get_rel()
         self.active = False
 
     def update(self):
         """Рассчитывает положение виртуального джойстика мыши.
         СТРУКТУРА: Ноль радиан находится строго на 12 часах, инкремент идет по часовой стрелке!"""
+    # 🔥 проверка таймера удержания
+        if self.held_key is not None and not self.active:
+            if pygame.time.get_ticks() - self.held_since >= self.tap_threshold_ms:
+                key = self.held_key
+                self.active = True
+                self.vx = 0
+                self.vy = 0
+                pygame.mouse.get_rel()
+
+                key_to_slot = {
+                    pygame.K_1: 1, pygame.K_2: 2, pygame.K_3: 3,
+                    pygame.K_4: 4, pygame.K_5: 5, pygame.K_6: 6,
+                }
+                if key in key_to_slot:
+                    self.hovered_slot = key_to_slot[key]
+
         if not self.active:
             return
 
